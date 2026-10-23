@@ -163,6 +163,17 @@ HISTORY_MSG_MAX_CHARS = int(os.getenv("QA_HISTORY_MSG_MAX_CHARS", "400"))
 #   输出预留 1200 tok → 峰值 ≈ 3650 tok，仍在 4096 内，不会触发 context shift。
 # 注：不要超过 3000 字——3~4 轮后 system+历史会顶到 4096 上限。
 CONTEXT_MAX_CHARS = int(os.getenv("QA_CONTEXT_MAX_CHARS", "2400"))
+# 学段越界拦截（out-of-scope，2.9）：知识库只收录《义务教育语文课程标准（2022 年版）》，
+# 覆盖小学一年级至初中九年级（第一~第四学段）。高中/学前/大学等学段不在库内，
+# 若放行会给模型一堆无关段落（实测问"高一"召回的全是第一学段 1~2 年级），
+# 模型便用参数知识自由发挥——典型的越界幻觉。故在生成前直接短路拒答。
+SCOPE_GUARD_ENABLED = _bool("QA_SCOPE_GUARD", "1")
+SCOPE_REFUSAL_TEXT = os.getenv(
+    "QA_SCOPE_REFUSAL",
+    "本知识库只收录《义务教育语文课程标准（2022 年版）》，覆盖小学一年级至初中九年级"
+    "（第一至第四学段）。你问到的是{course}阶段，超出本知识库的覆盖范围，"
+    "我无法依据课标作答。高中阶段可参阅《普通高中语文课程标准（2017 年版 2020 年修订）》。",
+)
 TOOL_ENABLED = _bool("QA_TOOL_ENABLED", "1")       # 是否启用本地工具（NL2SQL/古诗/文本统计等）
 AGENT_MODEL = os.getenv("QA_AGENT_MODEL", GEN_MODEL)  # 路由/工具决策所用模型，默认复用生成模型
 TOOL_MAX_TURNS = int(os.getenv("QA_TOOL_MAX_TURNS", "3"))  # ReAct 式工具循环最大轮数

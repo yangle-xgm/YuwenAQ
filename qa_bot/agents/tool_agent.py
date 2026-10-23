@@ -16,7 +16,8 @@
 from ..config import SYSTEM_PROMPT
 from ..llm import OllamaClient
 from ..bot.core import CourseQA, _remember
-from ..routing import route
+from ..bot.scope import refusal_for
+from ..routing import route, RouteDecision
 from ..tools import dispatch
 
 
@@ -52,6 +53,14 @@ class ToolAgent:
         if decision is None:
             decision = self.decide(query)
 
+        # 2.9：学段越界先拦截——不论路由成 rag/chat/tool，越界问题一律标准化拒答。
+        # 放在分流之前，避免"闲聊通道"把越界问题用参数知识自由发挥。
+        refusal = refusal_for(retrieve_query or query)
+        if refusal:
+            _remember(self.history, "user", query)
+            _remember(self.history, "assistant", refusal)
+            return refusal
+
         if decision.channel == "tool":
             result = dispatch(decision.tool, decision.arg)
             _remember(self.history, "user", query)
@@ -76,6 +85,14 @@ class ToolAgent:
         否则"那四年级呢？"既路由不准也检索不到。
         """
         self.last_rewrite = None
+        # 2.9：越界学段在"追问改写 + 意图路由"之前就短路——这两步各要一次 LLM 调用
+        # （路由约 20s），越界题没必要付这个延迟，直接给标准化拒答。
+        refusal = refusal_for(query)
+        if refusal:
+            _remember(self.history, "user", query)
+            _remember(self.history, "assistant", refusal)
+            return RouteDecision(channel="refuse"), refusal
+
         q_eff = query
         if self.history:
             q_eff = self.qa.effective_query(query)

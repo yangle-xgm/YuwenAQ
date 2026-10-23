@@ -104,6 +104,16 @@ class CourseQA:
 
         return rewrite_query(query, self.history, self.client)
 
+    def _scope_refusal(self, query):
+        """学段越界检测（2.9）：越界则返回标准拒答文案，否则 None。
+
+        知识库只覆盖义务教育 1~9 年级；高中/学前/大学等越界问题若放行，
+        检索会硬返回一堆无关段落，模型随之自由发挥（幻觉）。
+        """
+        from .scope import refusal_for
+
+        return refusal_for(query)
+
     def _system(self, query, effective=None):
         """
         私有（内部）方法：构建 system prompt（系统提示词）。
@@ -123,6 +133,13 @@ class CourseQA:
         返回值: 模型生成的完整回答字符串。
         """
         # 调用客户端的 ask：传入问题、动态构建的 system prompt、以及历史上下文
+        # 2.9：先做学段越界拦截，越界直接拒答，不检索、不生成（避免无关段落引发幻觉）
+        refusal = self._scope_refusal(retrieve_query or query)
+        if refusal:
+            _remember(self.history, "user", query)
+            _remember(self.history, "assistant", refusal)
+            return refusal
+
         answer = self.client.ask(query, system_prompt=self._system(query, retrieve_query),
                                  history=self.history)
 
@@ -139,6 +156,13 @@ class CourseQA:
         使用 yield from 把客户端产生的流式片段逐个向上透传。
         """
         parts = []
+        # 2.9：学段越界直接拒答（流式通道同样短路，不消耗一次生成）
+        refusal = self._scope_refusal(retrieve_query or query)
+        if refusal:
+            _remember(self.history, "user", query)
+            _remember(self.history, "assistant", refusal)
+            yield refusal
+            return
         for piece in self.client.ask_stream(
             query, system_prompt=self._system(query, retrieve_query), history=self.history
         ):
@@ -154,6 +178,14 @@ class CourseQA:
         会一并流式返回模型的推理链路（reasoning）与最终回答。
         """
         parts = []
+        # 2.9：学段越界直接拒答（带思考的流式通道同样短路）
+        refusal = self._scope_refusal(retrieve_query or query)
+        if refusal:
+            _remember(self.history, "user", query)
+            _remember(self.history, "assistant", refusal)
+            yield {"type": "answer_start"}
+            yield {"type": "content", "text": refusal}
+            return
         for ev in self.client.ask_stream_reasoning(
             query, system_prompt=self._system(query, retrieve_query),
             history=self.history, think=think,

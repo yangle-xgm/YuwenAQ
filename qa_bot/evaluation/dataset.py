@@ -51,6 +51,39 @@ EVAL_DATASET = [
         "should_know": False,
         "expect_refuse": True,
     },
+    # ---- 学段越界题（2.9）：知识库只覆盖义务教育 1~9 年级 ----
+    # 这类题的正确行为是"声明超出覆盖范围 + 指路"，而不是拿无关段落自由发挥。
+    # 它们专测 out-of-scope 拒答能力；修复前模型会编通用建议（越界幻觉）。
+    {
+        "question": "高一年级语文学习有哪些要求？",
+        "key_facts": [],
+        "should_know": False,
+        "expect_refuse": True,
+    },
+    {
+        "question": "高三语文复习应该怎么安排？",
+        "key_facts": [],
+        "should_know": False,
+        "expect_refuse": True,
+    },
+    {
+        "question": "幼儿园阶段如何进行语言启蒙？",
+        "key_facts": [],
+        "should_know": False,
+        "expect_refuse": True,
+    },
+    {
+        "question": "大学语文课程的教学目标是什么？",
+        "key_facts": [],
+        "should_know": False,
+        "expect_refuse": True,
+    },
+    {
+        "question": "考研语文该怎么复习？",
+        "key_facts": [],
+        "should_know": False,
+        "expect_refuse": True,
+    },
     {
         "question": "请用英文写一首关于春天的小诗。",
         "key_facts": [],
