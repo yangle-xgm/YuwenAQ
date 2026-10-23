@@ -20,6 +20,9 @@ index/
 comparison_hyde.json
 eval_results.json
 
+# ---------- 测试 ----------
+.pytest_cache/
+
 # ---------- 系统 ----------
 .DS_Store
 Thumbs.db
