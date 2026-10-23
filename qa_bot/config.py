@@ -107,6 +107,23 @@ GRAM_HIT_FLOOR = float(os.getenv("QA_GRAM_HIT_FLOOR", "0.35"))
 #   它不是课标正文，不该当答案来源，故给它一个降权系数（仍可被检索到，只是不再压制正文）。
 NAV_SOURCES = tuple(os.getenv("QA_NAV_SOURCES", "00_").split(","))
 NAV_PRIOR = float(os.getenv("QA_NAV_PRIOR", "0.55"))
+# 编者生成的元信息块（同 00_ 导航的性质，但分散在各分册里）：
+#   · “常见问答（FAQ）”是知识库整理时补的 Q&A，术语密度极高（一个问题复述多个概念），
+#     实测会压过真正的课标正文（“教师培训”FAQ 0.653 > 正文 0.631；“课程内容主题”
+#     FAQ 0.664 > 正文 0.523）。
+#   · 它们是二手解读，不是课标原文，不该当答案来源。
+# 与 NAV_PRIOR 分开配置：FAQ 内容仍可能相关（有些问题课标没有直接条文），
+# 所以用更温和的降权系数。
+META_PATH_KEYWORDS = tuple(
+    k for k in os.getenv("QA_META_PATH_KEYWORDS", "常见问答,FAQ,数据说明").split(",") if k
+)
+META_PRIOR = float(os.getenv("QA_META_PRIOR", "0.65"))
+# 0.65 由 18 题检索评测标定（qa_bot/evaluation/retrieval_eval.py）：
+#   1.00 → Hit@1 0.611 / MRR 0.744 / Meta@6 0.250 / Bad 4
+#   0.65 → Hit@1 0.778 / MRR 0.846 / Meta@6 0.074 / Bad 2   ← 采用
+#   0.55 → Hit@1 0.778 / MRR 0.849 / Meta@6 0.019 / Bad 1
+# 0.65 与 0.55 的排序几乎等价，取更保守的一侧：FAQ 内容相关时仍能进前 6
+# （“背诵古诗文推荐多少篇”只有 FAQ 讲得最全，压太狠会丢掉唯一来源）。
 # 同一章节最多取几块：防止某个长章节（如"教学研究与教师培训"8 条）用相似分占满 top_k，
 # 把别的章节（如"教学建议"）挤出局。0 表示不限制。
 SECTION_CAP = int(os.getenv("QA_SECTION_CAP", "2"))

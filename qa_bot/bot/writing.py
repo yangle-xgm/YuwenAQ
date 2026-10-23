@@ -75,6 +75,63 @@ def disclaimer(stage):
     )
 
 
+# ---------------------------------------------------------------- 点评剥离（2.10 遗留项）
+# 提示词已写"只输出作文正文，不要输出任何解释、点评或说明"，但 7B 仍会在正文后
+# 追加一段"这篇作文符合第四学段学生的表达水平，结构完整，语言朴实……"。
+# 与 2.10 的判断一致：模型不听话的地方用代码兜底。
+#
+# 判定用三个特征相乘（而不是只看一个词），避免误删正文最后一段：
+#   ① 段落以"这篇/本文/整篇/以上…作文|文章|习作"开头，或以【点评】之类的标记开头；
+#   ② 命中两个以上评价词（结构完整/语言朴实/中心明确…）；
+#   ③ 段落长度不超过 150 字（点评通常很短，正文段落往往更长）。
+_COMMENTARY_HEAD = re.compile(
+    r"^[【\[]?\s*(这篇|本文|整篇|以上|该作文|此作文|这篇习作|总评|点评|评析)"
+)
+_COMMENTARY_MARK_HEAD = re.compile(r"^[【\[]\s*(点评|评析|总评|说明|教师点评)")
+_COMMENTARY_WORDS = (
+    "结构完整", "语言朴实", "中心明确", "详略得当", "条理清晰", "符合第",
+    "表达流畅", "情感真挚", "首尾呼应", "切合题意", "符合题意", "选材真实",
+    "以上就是", "希望能帮", "仅供参考",
+)
+_COMMENTARY_MAXLEN = 150
+
+
+def _is_commentary(para: str) -> bool:
+    s = para.strip()
+    if not s or len(s) > _COMMENTARY_MAXLEN:
+        return False
+    if _COMMENTARY_MARK_HEAD.match(s):
+        return True
+    word_hits = sum(1 for w in _COMMENTARY_WORDS if w in s)
+    if word_hits >= 2:
+        return True
+    # 以"这篇作文…"开头 + 至少一个评价词，也判为点评
+    return bool(_COMMENTARY_HEAD.match(s)) and word_hits >= 1
+
+
+def strip_commentary(text):
+    """剥掉正文之后追加的点评段落，最多检查末尾两段。
+
+    只从末尾往前剥，且要求"剥完还剩足够长的正文"（≥200 字）——
+    宁可不剥，也不能把整篇作文误删成一段评语。
+    """
+    s = (text or "").strip()
+    if not s:
+        return s
+    paras = [p for p in s.split("\n\n") if p.strip()]
+    if len(paras) < 2:
+        return s
+    removed = 0
+    while len(paras) > 1 and removed < 2 and _is_commentary(paras[-1]):
+        # 剥完剩下的正文必须还够长，否则说明这是"没有正文只有评语"，不能剥
+        rest = "\n\n".join(paras[:-1])
+        if len(rest) < 200:
+            break
+        paras.pop()
+        removed += 1
+    return "\n\n".join(paras).strip()
+
+
 def build_writing_system(query, stage, requirements):
     """写作专用 system prompt：把学段要求 + 字数下限写成硬约束。"""
     floor = STAGE_MIN_WORDS.get(stage or "")

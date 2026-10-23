@@ -123,7 +123,7 @@ class CourseQA:
         说明文字由代码生成（`writing.disclaimer`），保证一定出现"课标未收录范文"，
         不依赖 7B 自觉；正文用写作专用提示词，并把该学段写作要求检索出来当约束。
         """
-        from .writing import build_writing_system, disclaimer
+        from .writing import build_writing_system, disclaimer, strip_commentary
 
         stage = (wr or {}).get("stage")
         requirements = ""
@@ -142,7 +142,9 @@ class CourseQA:
         body = self.client.ask(
             query, system_prompt=system, history=self.history, max_tokens=1500
         )
-        answer = disclaimer(stage) + (body or "").strip()
+        # strip_commentary：7B 常在正文后追加"结构完整、语言朴实"式点评（提示词挡不住），
+        # 这里按段落特征剥掉，保证返回给用户的是一篇干净的作文。
+        answer = disclaimer(stage) + strip_commentary((body or "").strip())
         _remember(self.history, "user", query)
         _remember(self.history, "assistant", answer)
         return answer

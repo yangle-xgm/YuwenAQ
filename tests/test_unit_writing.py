@@ -130,3 +130,54 @@ def test_writing_system_prompt_no_stage_fallback():
 
     sys_prompt = build_writing_system("写一篇作文", None, "")
     assert "第四学段" in sys_prompt  # 兜底按第四学段
+
+
+# ---------------------------------------------------------------- 点评剥离（2.10 遗留项）
+_FAKE_BODY = (
+    "那天下午，我把书包放在教室的椅子上，跑出去玩了。"
+    + "操场上很热闹，同学们都在追逐打闹，笑声一阵接着一阵。"
+    + "操场边的梧桐树落了一地叶子，风一吹就打着旋儿往前跑。" * 8
+    + "\n\n回家路上，我的心里暖暖的，这个下午对我来说充满了温暖和感激。"
+)
+
+
+def test_strip_commentary_removes_trailing_review():
+    """正文后追加的“结构完整、语言朴实”式点评应被剥掉。"""
+    from qa_bot.bot.writing import strip_commentary
+
+    raw = _FAKE_BODY + "\n\n这篇作文符合第四学段学生的表达水平，结构完整，语言朴实，表达了感激之情。"
+    out = strip_commentary(raw)
+    assert out == _FAKE_BODY
+    assert "结构完整" not in out
+
+
+def test_strip_commentary_keeps_pure_body():
+    """没有点评的正文不应被改动（避免误删最后一段）。"""
+    from qa_bot.bot.writing import strip_commentary
+
+    assert strip_commentary(_FAKE_BODY) == _FAKE_BODY
+
+
+def test_strip_commentary_handles_bracket_marker():
+    """【点评】这类显式标记也要能剥掉。"""
+    from qa_bot.bot.writing import strip_commentary
+
+    out = strip_commentary(_FAKE_BODY + "\n\n【点评】中心明确，条理清晰。")
+    assert out == _FAKE_BODY
+
+
+def test_strip_commentary_protects_short_body():
+    """正文太短（<200 字）时不剥——宁可留着评语，也不能把全文删成一句评语。"""
+    from qa_bot.bot.writing import strip_commentary
+
+    short = "开头。\n\n细节描写很到位，结构完整，语言朴实。"
+    assert strip_commentary(short) == short
+
+
+def test_strip_commentary_ignores_long_paragraph():
+    """长段落即使含评价词也不剥（正文段落常超过 150 字，靠长度排除误判）。"""
+    from qa_bot.bot.writing import strip_commentary
+
+    long_para = "这段写得很长。" * 40  # 280 字，远超点评上限
+    text = _FAKE_BODY + "\n\n" + long_para + "结构完整，语言朴实。"
+    assert strip_commentary(text) == text

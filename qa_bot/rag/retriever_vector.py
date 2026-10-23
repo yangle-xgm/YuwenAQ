@@ -42,6 +42,8 @@ from ..config import (
     HYDE_MODEL,
     NAV_SOURCES,
     NAV_PRIOR,
+    META_PATH_KEYWORDS,
+    META_PRIOR,
     SECTION_CAP,
     RARE_IDF_PERCENTILE,
     RARE_IDF_FLOOR,
@@ -127,9 +129,20 @@ class VectorRetriever:
 
     # ---- 各打分信号 ----------------------------------------------------
     def _nav_factor(self, c):
-        """导航/元信息类文件（如 00_总览的目录树）的降权系数。"""
+        """导航/编者元信息类块的降权系数。
+
+        分两档，因为性质不同：
+          · 00_ 总览：纯导航（目录树 + 检索指南），几乎不当答案来源 → NAV_PRIOR（0.55）
+          · 编制时补的 FAQ/数据说明：二手解读，术语密度高会压过正文，但内容仍可能
+            相关（有些问题课标没有直接条文） → META_PRIOR（0.75，更温和）
+        """
         src = c.get("source") or ""
-        return NAV_PRIOR if any(src.startswith(p) for p in NAV_SOURCES if p) else 1.0
+        if any(src.startswith(p) for p in NAV_SOURCES if p):
+            return NAV_PRIOR
+        path = c.get("path") or ""
+        if any(k in path for k in META_PATH_KEYWORDS):
+            return META_PRIOR
+        return 1.0
 
     def _lexical(self, qgrams, c):
         """查询与某个分块正文的 IDF 加权 bigram 重合度（关键词命中强度）。"""
