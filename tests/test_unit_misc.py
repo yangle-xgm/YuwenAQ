@@ -312,10 +312,10 @@ def test_retrieve_knowledge_disabled_kb():
 
 
 def test_retrieve_knowledge_single_oversized_block():
-    """【期望行为】单个知识块本身超过上限时也应被裁剪。
+    """回归（D-7）：单个知识块本身超过上限时也应被裁剪。
 
-    当前实现「首块无条件加入」，若某块长于 CONTEXT_MAX_CHARS，
-    会把 system 顶到 4096 窗口外（现有语料单块约 500 字，暂不触发）。
+    原实现「首块无条件加入」，若某块长于 CONTEXT_MAX_CHARS，
+    会把 system 顶到 4096 窗口外（现有语料单块约 500 字，属潜在触发）。
     """
     from qa_bot.config import CONTEXT_MAX_CHARS
 
@@ -349,3 +349,39 @@ def test_cli_call_sites_match_method_signatures():
         except TypeError as e:
             problems.append(f"cli.py:{node.lineno} bot.{f.attr}(...) -> {e}")
     assert not problems, "CLI 调用与方法签名不一致：\n" + "\n".join(problems)
+
+
+def test_ask_stream_forwards_think_flag():
+    """回归（D-2）：ask_stream 的 think 参数必须真的透传到 LLM 客户端。
+
+    快速模式（CLI 的 /fast）靠 think=False 关闭思考；此前该参数不在签名里，
+    一提问就 TypeError。静态契约只能保证"能调用"，这里验证"能生效"。
+    """
+    from qa_bot.bot.core import CourseQA
+
+    qa = CourseQA(use_kb=False)
+    seen = {}
+
+    def fake_ask_stream(user_prompt, system_prompt=None, history=None, **kw):
+        seen.update(kw)
+        return iter(["回答"])
+
+    qa.client.ask_stream = fake_ask_stream
+    assert "".join(qa.ask_stream("你好", think=False)) == "回答"
+    assert seen.get("think") is False, f"think 未透传：{seen}"
+
+
+def test_ask_stream_default_think_follows_preset():
+    """不传 think 时应保持 None（由 GEN_PRESETS 决定），不能悄悄改成 True/False。"""
+    from qa_bot.bot.core import CourseQA
+
+    qa = CourseQA(use_kb=False)
+    seen = {}
+
+    def fake_ask_stream(user_prompt, system_prompt=None, history=None, **kw):
+        seen.update(kw)
+        return iter(["回答"])
+
+    qa.client.ask_stream = fake_ask_stream
+    list(qa.ask_stream("你好"))
+    assert seen.get("think") is None, f"默认 think 应为 None：{seen}"

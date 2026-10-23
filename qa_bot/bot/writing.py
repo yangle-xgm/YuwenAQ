@@ -44,14 +44,22 @@ def _stage_of(query):
 
 
 def detect_writing_request(query):
-    """判断是否为"索要范文/写一篇"的请求。返回 {"stage": 学段或 None}，否则 None。"""
+    """判断是否为"索要范文/写一篇"的请求。返回 {"stage": 学段或 None}，否则 None。
+
+    _SAMPLE_HINTS 与 _TASK_HINTS 两个分支**都必须过 _ASK_ONLY**：
+    「写一篇」既可能是"替我写一篇"，也可能是"如何写一篇"（求方法）。
+    原实现只给 _TASK_HINTS 分支加了排除，导致"如何写一篇写人作文"被直接产出作文（D-6）。
+    """
     q = (query or "").strip()
     if not q:
         return None
+    # 先判"问方法/问要求"：命中即为知识问答，不代写
+    if _ASK_ONLY.search(q):
+        return None
     if _SAMPLE_HINTS.search(q):
         return {"stage": _stage_of(q)}
-    # "作文/习作/写话"若是在问要求、次数、字数，属正常知识问答，不算索要范文
-    if _TASK_HINTS.search(q) and not _ASK_ONLY.search(q):
+    # "作文/习作/写话"没说方法也没说要一篇 → 按索要范文处理
+    if _TASK_HINTS.search(q):
         return {"stage": _stage_of(q)}
     return None
 

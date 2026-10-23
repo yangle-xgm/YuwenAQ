@@ -198,10 +198,10 @@ def test_curriculum_written_chars(tmp_db):
 
 
 def test_curriculum_sum_respects_stage_filter(tmp_db):
-    """【期望行为】带学段的求和只应统计该学段。
+    """回归（D-3）：带学段的求和只统计该学段。
 
-    当前 _build_sql 在 op=sum 时重建 SQL、直接丢掉 WHERE，导致
-    「第一学段课外阅读量求和」返回全表合计 405（正确值应为 5）。
+    原 _build_sql 在 op=sum 时重建 SQL、直接丢掉 WHERE，
+    「第一学段课外阅读量求和」返回全表合计 405（正确值 5）。
     """
     from qa_bot.tools import dispatch
 
@@ -211,10 +211,10 @@ def test_curriculum_sum_respects_stage_filter(tmp_db):
 
 
 def test_curriculum_avg_query(tmp_db):
-    """【期望行为】含「平均」的查询应走聚合，而不是回退成明细列表。
+    """回归（D-4）：含「平均」的查询走聚合，而不是回退成明细列表。
 
-    当前 _detect_op 先判「各学段」，导致「各学段课外阅读量平均」被判成 list，
-    avg 分支永远进不去。
+    原 _detect_op 先判「各学段」→ list，avg 分支永远进不去。
+    现在聚合判定优先于 list。
     """
     from qa_bot.tools import dispatch
 
@@ -223,7 +223,11 @@ def test_curriculum_avg_query(tmp_db):
 
 
 def test_curriculum_primary_school_excludes_junior(tmp_db):
-    """【期望行为】「小学」只应覆盖前三学段，不应包含第四学段（初中）。"""
+    """回归（D-5）：「小学」只覆盖前三学段，不应包含第四学段（初中）。
+
+    原 _STAGE_MAP 把「小学」映射成 None（=全部学段），
+    使「小学课外阅读量」返回结果里混进 260 万字的初中指标。
+    """
     from qa_bot.tools import dispatch
 
     out = dispatch("query_curriculum_db", "小学课外阅读量要求")

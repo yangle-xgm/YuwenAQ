@@ -95,6 +95,12 @@ RERANK_WEIGHTS = {
 RARE_IDF_PERCENTILE = int(os.getenv("QA_RARE_IDF_PERCENTILE", "75"))
 RARE_IDF_FLOOR = float(os.getenv("QA_RARE_IDF_FLOOR", "2.0"))
 SIMILARITY_CUTOFF = float(os.getenv("QA_SIMILARITY_CUTOFF", "0.2"))
+# 相关性下限（D-1）：query 的字符 bigram 有多少比例真的出现在语料里。
+# 这一项才是区分"知识库无关问题"的可靠信号——实测无关问题（天气/电影/红烧肉）
+# 命中率 0.00~0.29，而课标问题的命中率 0.43 以上，中间有干净的间隔。
+# 不能用融合分做这道闸：无关问题靠"一部/怎么"这类常用词也能刷到 0.68，比真实
+# 短查询（"教学建议有哪些" 0.62）还高；余弦也重叠（0.50 vs 0.52）。
+GRAM_HIT_FLOOR = float(os.getenv("QA_GRAM_HIT_FLOOR", "0.35"))
 # 2.5+ 检索噪声治理（本轮定向优化）：
 #   00_总览与检索指南.md 是"目录树 + 检索指南"这类导航/元信息文件，几乎把全课标的术语
 #   都塞在少数几块里，导致向量/关键词/覆盖率三路信号都虚高，常年霸占 top_k。

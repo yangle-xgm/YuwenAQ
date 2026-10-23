@@ -85,9 +85,12 @@ class CourseQA:
             return ""
         # 逐块拼接，直到触达 CONTEXT_MAX_CHARS：知识块是"上下文大户"，
         # 本机 iGPU 的 num_ctx 硬顶 4096 token，必须给历史与输出留出余量。
+        # 注意每块（含第一块）都要先裁到上限：原实现的首块无条件加入，
+        # 一旦换语料或调大 CHUNK_SIZE 出现超长块，system 会被顶出窗口直接 500（D-7）。
         blocks, used = [], 0
         for _, src, txt in hits:
-            piece = f"[出处：{src}]\n{txt}"
+            # _clip 会在末尾补一个"…"，故留 1 字符余量，保证单块不超上限。
+            piece = _clip(f"[出处：{src}]\n{txt}", CONTEXT_MAX_CHARS - 1)
             if blocks and used + len(piece) > CONTEXT_MAX_CHARS:
                 break
             blocks.append(piece)
@@ -190,11 +193,14 @@ class CourseQA:
 
         return answer
 
-    def ask_stream(self, query, retrieve_query=None):
+    def ask_stream(self, query, retrieve_query=None, think=None):
         """
         流式问答方法：逐字/逐段返回回答（生成器）。
         适用于前端需要"打字机"式实时显示回答的场景。
         使用 yield from 把客户端产生的流式片段逐个向上透传。
+
+        think：推理模型的思考开关（None=跟随 GEN_PRESETS 预设）。CLI 的快速模式
+        会传 think=False 关闭思考，此前该参数未在签名里，直接 TypeError（D-2）。
         """
         parts = []
         # 2.9：学段越界直接拒答（流式通道同样短路，不消耗一次生成）
@@ -210,7 +216,8 @@ class CourseQA:
             yield self._write_sample(query, wr)
             return
         for piece in self.client.ask_stream(
-            query, system_prompt=self._system(query, retrieve_query), history=self.history
+            query, system_prompt=self._system(query, retrieve_query),
+            history=self.history, think=think,
         ):
             parts.append(piece)
             yield piece

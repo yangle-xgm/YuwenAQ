@@ -60,10 +60,10 @@ def test_requirement_questions_not_treated_as_sample(query):
     ],
 )
 def test_method_questions_not_treated_as_sample(query):
-    """【期望行为】问「如何/怎样写一篇…」是求方法，不该直接给一篇作文。
+    """回归（D-6）：问「如何/怎样写一篇…」是求方法，不该直接给一篇作文。
 
-    当前实现里 _SAMPLE_HINTS 分支没有过 _ASK_ONLY，会把这类问题判成范文请求，
-    属于已知缺陷（见日志第十七章）。
+    原实现 _SAMPLE_HINTS 分支没有过 _ASK_ONLY，把求方法误判成索要范文。
+    现在两个分支都先过 _ASK_ONLY。
     """
     from qa_bot.bot.writing import detect_writing_request
 

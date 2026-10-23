@@ -37,6 +37,7 @@ from ..config import (
     RERANK_ENABLED,
     RERANK_WEIGHTS,
     SIMILARITY_CUTOFF,
+    GRAM_HIT_FLOOR,
     HYDE_ENABLED,
     HYDE_MODEL,
     NAV_SOURCES,
@@ -257,6 +258,16 @@ class VectorRetriever:
         qv = self._query_vector(query)
         qgrams = self._query_grams(query)
         targets = _grade_targets(query)
+
+        # 相关性下限（D-1）：先看"问题里的词有多少真的出现在课标语料里"。
+        # 无关问题（天气、电影、菜谱）词面命中率实测 0.00~0.29，课标问题 0.43 以上，
+        # 阈值 0.35 落在干净的间隔里。命中率不足就直接返回空——让系统提示词第 2 条
+        # 引导模型说明"知识库暂未覆盖"，好过强塞 6 条噪声去买一次幻觉。
+        if qgrams:
+            hit = sum(1 for g in qgrams if g in self.idf)
+            if hit / len(qgrams) < GRAM_HIT_FLOOR:
+                return []
+
         cos = self.matrix @ qv                       # 向量余弦（归一化后=点积），(N,)
 
         # 第一阶段：相似度截断 + 粗排，取 CANDIDATE_K 候选

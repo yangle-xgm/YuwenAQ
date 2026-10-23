@@ -28,12 +28,20 @@ _ROWS = [
 ]
 
 # 学段关键词 -> 标准学段名（确定性匹配，避免模型自由发挥）
+# 值为 str = 单个学段；值为 tuple = 一组学段（SQL 用 IN）；值为 None = 全部学段。
+_PRIMARY_STAGES = (
+    "第一学段（1~2年级）", "第二学段（3~4年级）", "第三学段（5~6年级）",
+)
 _STAGE_MAP = [
-    ("第一学段", "第一学段（1~2年级）"), ("一二年级", "第一学段（1~2年级）"), ("1~2年级", "第一学段（1~2年级）"),
-    ("第二学段", "第二学段（3~4年级）"), ("三四年级", "第二学段（3~4年级）"), ("3~4年级", "第二学段（3~4年级）"),
-    ("第三学段", "第三学段（5~6年级）"), ("五六年级", "第三学段（5~6年级）"), ("5~6年级", "第三学段（5~6年级）"),
     ("第四学段", "第四学段（7~9年级）"), ("七八九年级", "第四学段（7~9年级）"), ("7~9年级", "第四学段（7~9年级）"),
-    ("初中", "第四学段（7~9年级）"), ("小学", None),  # 小学=前三个学段
+    ("初中", "第四学段（7~9年级）"),
+    ("第三学段", "第三学段（5~6年级）"), ("五六年级", "第三学段（5~6年级）"), ("5~6年级", "第三学段（5~6年级）"),
+    ("第二学段", "第二学段（3~4年级）"), ("三四年级", "第二学段（3~4年级）"), ("3~4年级", "第二学段（3~4年级）"),
+    ("第一学段", "第一学段（1~2年级）"), ("一二年级", "第一学段（1~2年级）"), ("1~2年级", "第一学段（1~2年级）"),
+    # 「小学」只覆盖前三个学段（义务教育的 1~6 年级），不能映射成"全部学段"，
+    # 否则会把第四学段（初中 7~9 年级）的指标混进来（D-5）。
+    ("小学", _PRIMARY_STAGES),
+    ("全部学段", None), ("各学段", None), ("所有学段", None),
 ]
 
 _METRIC_MAP = [
@@ -67,10 +75,14 @@ def ensure_db() -> None:
 
 
 def _detect_stage(text: str):
-    """返回 (stage_filter, is_all)。stage_filter 为具体学段名或 None（全部）。"""
+    """返回 (stage_filter, is_all)。
+
+    stage_filter：具体学段名（str）／一组学段（tuple）／None（未提学段）。
+    is_all：用户明确说了"各学段/全部学段"，即统计口径为全量。
+    """
     for kw, stage in _STAGE_MAP:
         if kw in text:
-            return stage, (stage is None)
+            return stage, (stage is None and kw in ("全部学段", "各学段", "所有学段"))
     return None, False
 
 
@@ -87,8 +99,12 @@ def _detect_metric(text: str) -> str:
 
 
 def _detect_op(text: str) -> str:
-    if any(k in text for k in ("对比", "比较", "各学段", "分别", "各个")):
-        return "list"
+    """判定运算类型。**聚合运算优先于 list**：
+
+    原实现先判"各学段/分别/比较"→ list，导致"各学段课外阅读量平均是多少"
+    永远走不到 avg 分支（avg 不可达，D-4）。聚合语义比"列出来看"更强，
+    故先判 sum/avg/max/min，都不命中才落到 list。
+    """
     if any(k in text for k in ("求和", "总共", "累计", "一共", "合计", "加起来")):
         return "sum"
     if any(k in text for k in ("平均", "均值")):
@@ -97,30 +113,41 @@ def _detect_op(text: str) -> str:
         return "max"
     if any(k in text for k in ("最少", "最低", "最小")):
         return "min"
+    if any(k in text for k in ("对比", "比较", "各学段", "分别", "各个")):
+        return "list"
     return "point"
 
 
-def _build_sql(stage, is_all_stages, metric, op) -> str:
-    cols = ["学段", metric] if metric else ["学段", "识字量_认识", "识字量_会写", "课外阅读量_万字"]
-    sql = f"SELECT {', '.join(cols)} FROM curriculum_metrics"
+def _where_clause(stage) -> str:
+    """把学段解析结果转成 WHERE 子句（str 精确匹配 / tuple 用 IN / None 不加条件）。"""
+    if isinstance(stage, (list, tuple)):
+        quoted = ", ".join(f"'{s}'" for s in stage)
+        return f" WHERE 学段 IN ({quoted})"
     if stage:
-        sql += f" WHERE 学段 = '{stage}'"
-    elif is_all_stages:
-        pass  # 全部学段
-    # 运算
-    if op == "sum":
+        return f" WHERE 学段 = '{stage}'"
+    return ""
+
+
+def _build_sql(stage, is_all_stages, metric, op) -> str:
+    """拼 SQL。**聚合分支也必须带上 WHERE**——
+
+    原实现在 sum/avg/max/min 时整体重写 SQL 字符串，把前面的 WHERE 丢了，
+    于是"第一学段课外阅读量求和"会返回四个学段的合计 405（正确值是 5）（D-3）。
+    """
+    cols = ["学段", metric] if metric else ["学段", "识字量_认识", "识字量_会写", "课外阅读量_万字"]
+    where = _where_clause(stage)
+    if op in ("sum", "avg", "max", "min"):
         col = metric or "课外阅读量_万字"
-        sql = f"SELECT '合计', SUM({col}) FROM curriculum_metrics"
-    elif op == "avg":
-        col = metric or "课外阅读量_万字"
-        sql = f"SELECT '平均', AVG({col}) FROM curriculum_metrics"
-    elif op == "max":
-        col = metric or "课外阅读量_万字"
-        sql = f"SELECT 学段, {col} FROM curriculum_metrics ORDER BY {col} DESC LIMIT 1"
-    elif op == "min":
-        col = metric or "课外阅读量_万字"
-        sql = f"SELECT 学段, {col} FROM curriculum_metrics ORDER BY {col} ASC LIMIT 1"
-    return sql
+        if op == "sum":
+            return f"SELECT '合计', SUM({col}) FROM curriculum_metrics{where}"
+        if op == "avg":
+            return f"SELECT '平均', AVG({col}) FROM curriculum_metrics{where}"
+        direction, label = ("DESC", "最高") if op == "max" else ("ASC", "最低")
+        return (
+            f"SELECT 学段, {col} FROM curriculum_metrics{where} "
+            f"ORDER BY {col} {direction} LIMIT 1"
+        )
+    return f"SELECT {', '.join(cols)} FROM curriculum_metrics{where}"
 
 
 # 数据库字段名 -> 给用户看的中文可读名
