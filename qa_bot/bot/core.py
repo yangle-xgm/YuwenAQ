@@ -114,6 +114,42 @@ class CourseQA:
 
         return refusal_for(query)
 
+    def _write_sample(self, query, wr):
+        """范文请求的确定性处理（2.10）。
+
+        说明文字由代码生成（`writing.disclaimer`），保证一定出现"课标未收录范文"，
+        不依赖 7B 自觉；正文用写作专用提示词，并把该学段写作要求检索出来当约束。
+        """
+        from .writing import build_writing_system, disclaimer
+
+        stage = (wr or {}).get("stage")
+        requirements = ""
+        if self.use_kb and self.retriever:
+            hits = self.retriever.retrieve(f"{stage or '第四学段'} 写作 表达与交流 要求")
+            blocks, used = [], 0
+            for _, src, txt in hits[:3]:
+                piece = f"[出处：{src}]\n{txt}"
+                if blocks and used + len(piece) > CONTEXT_MAX_CHARS:
+                    break
+                blocks.append(piece)
+                used += len(piece) + 2
+            requirements = "\n\n".join(blocks)
+
+        system = build_writing_system(query, stage, requirements)
+        body = self.client.ask(
+            query, system_prompt=system, history=self.history, max_tokens=1500
+        )
+        answer = disclaimer(stage) + (body or "").strip()
+        _remember(self.history, "user", query)
+        _remember(self.history, "assistant", answer)
+        return answer
+
+    def _writing_request(self, query):
+        """范文/写一篇请求检测（2.10）；不是这类请求返回 None。"""
+        from .writing import detect_writing_request
+
+        return detect_writing_request(query)
+
     def _system(self, query, effective=None):
         """
         私有（内部）方法：构建 system prompt（系统提示词）。
@@ -140,6 +176,11 @@ class CourseQA:
             _remember(self.history, "assistant", refusal)
             return refusal
 
+        # 2.10：索要范文 → 走写作专用通道（确定性声明 + 课标写作要求约束）
+        wr = self._writing_request(retrieve_query or query)
+        if wr:
+            return self._write_sample(query, wr)
+
         answer = self.client.ask(query, system_prompt=self._system(query, retrieve_query),
                                  history=self.history)
 
@@ -163,6 +204,11 @@ class CourseQA:
             _remember(self.history, "assistant", refusal)
             yield refusal
             return
+        # 2.10：范文请求不走流式生成（正文需整体拼装说明前缀），一次性产出
+        wr = self._writing_request(retrieve_query or query)
+        if wr:
+            yield self._write_sample(query, wr)
+            return
         for piece in self.client.ask_stream(
             query, system_prompt=self._system(query, retrieve_query), history=self.history
         ):
@@ -185,6 +231,13 @@ class CourseQA:
             _remember(self.history, "assistant", refusal)
             yield {"type": "answer_start"}
             yield {"type": "content", "text": refusal}
+            return
+        # 2.10：范文请求一次性产出（带确定性说明前缀）
+        wr = self._writing_request(retrieve_query or query)
+        if wr:
+            text = self._write_sample(query, wr)
+            yield {"type": "answer_start"}
+            yield {"type": "content", "text": text}
             return
         for ev in self.client.ask_stream_reasoning(
             query, system_prompt=self._system(query, retrieve_query),

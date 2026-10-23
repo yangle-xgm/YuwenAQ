@@ -1,0 +1,90 @@
+"""写作示范（范文）请求的确定性处理 —— 2.10。
+
+课标**不收录任何范文/例文**（全文 0 命中，只有写作要求）。但用户常直接索要"范文"，
+7B 模型会把它当成知识答出来、还自称"课标范本"——实测即使提示词明确要求声明，
+它也无视（生成 387 字、零声明）。故改为**代码兜底**：
+
+  1. 说明文字由代码生成（确定性前缀），明确"课标未收录范文，以下是参考示例"，
+     不依赖模型自觉；
+  2. 正文用专门的写作提示词（不是通用 RAG 模板），把该学段写作要求 + 字数下限作为硬约束；
+  3. 正文质量仍受 7B 能力限制（可能写不满字数、真情实感不足），但至少不会冒充课标原文。
+"""
+import re
+
+from ..config import GRADE_XUEDUAN
+
+# 明确"要一篇范文"
+_SAMPLE_HINTS = re.compile(r"范文|范本|例文|示例文|写一篇|写个|写一段|给我写|帮忙写")
+# 可能是"要写作任务"，也可能是"问写作要求"，需再排除
+_TASK_HINTS = re.compile(r"作文|习作|写话")
+_ASK_ONLY = re.compile(
+    r"要求|规定|标准|次数|多少字|字数|怎么教|教学建议|评价"
+    r"|如何|怎么|怎样|提高|方法|策略|水平|建议|指导|技巧"
+)
+
+_STAGE_RE = re.compile(r"第[一二三四]学段")
+_GRADE_RE = re.compile(r"初[一二三]|初中|(?<![初中高])[一二三四五六七八九十]年级|[1-9]年级")
+
+# 课标明确的字数额度（只有第四学段写了；其他学段课标未规定统一字数）
+STAGE_MIN_WORDS = {"第四学段": 500}
+
+
+def _stage_of(query):
+    """从问句里解析目标学段（无则 None）。"""
+    m = _STAGE_RE.search(query)
+    if m:
+        return m.group(0)
+    for g in _GRADE_RE.findall(query):
+        if g in GRADE_XUEDUAN:
+            return GRADE_XUEDUAN[g]
+        if g.endswith("年级") and g[0].isdigit():
+            cn = "一二三四五六七八九"[int(g[0]) - 1] + "年级"
+            return GRADE_XUEDUAN.get(cn)
+    return None
+
+
+def detect_writing_request(query):
+    """判断是否为"索要范文/写一篇"的请求。返回 {"stage": 学段或 None}，否则 None。"""
+    q = (query or "").strip()
+    if not q:
+        return None
+    if _SAMPLE_HINTS.search(q):
+        return {"stage": _stage_of(q)}
+    # "作文/习作/写话"若是在问要求、次数、字数，属正常知识问答，不算索要范文
+    if _TASK_HINTS.search(q) and not _ASK_ONLY.search(q):
+        return {"stage": _stage_of(q)}
+    return None
+
+
+def disclaimer(stage):
+    """代码生成的固定说明（不经过模型，保证一定会出现）。"""
+    s = stage or "对应"
+    floor = STAGE_MIN_WORDS.get(stage or "")
+    tail = "（该学段课标要求：45 分钟能完成不少于 500 字的习作）" if floor else ""
+    return (
+        f"【说明】本知识库只收录《义务教育语文课程标准（2022 年版）》条文，**未收录范文**。"
+        f"以下不是课标原文，而是依据{s}写作要求编写的**参考示例**，仅供对照学习{tail}。\n\n"
+    )
+
+
+def build_writing_system(query, stage, requirements):
+    """写作专用 system prompt：把学段要求 + 字数下限写成硬约束。"""
+    floor = STAGE_MIN_WORDS.get(stage or "")
+    floor_line = (
+        f"【字数下限】不少于 {floor} 字（课标：45 分钟能完成不少于 500 字的习作）。\n"
+        if floor else ""
+    )
+    return (
+        "你是语文写作辅导老师。请依据下面的课标写作要求，为学生写一篇**参考示例**（不是课标原文）。\n"
+        f"【目标学段】{stage or '按用户问题判断（如未说明，按第四学段处理）'}\n"
+        f"{floor_line}"
+        "【硬性要求】\n"
+        "1. 写学生自己的生活经历与真实感受，不要空泛写景、不要堆砌华丽辞藻。\n"
+        "2. 围绕一个明确的中心，结构完整（开头—主体—结尾），详略得当。\n"
+        "3. 语言朴实通顺，符合该学段学生的表达水平。\n"
+        "4. 只输出作文正文，不要输出任何解释、点评或说明。\n\n"
+        "【课标写作要求（参考）】\n"
+        f"{requirements or '（未检索到具体条文，按第四学段通用要求）'}\n\n"
+        f"【写作任务】{query}\n"
+        "作文："
+    )

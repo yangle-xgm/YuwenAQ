@@ -17,6 +17,7 @@ from ..config import SYSTEM_PROMPT
 from ..llm import OllamaClient
 from ..bot.core import CourseQA, _remember
 from ..bot.scope import refusal_for
+from ..bot.writing import detect_writing_request
 from ..routing import route, RouteDecision
 from ..tools import dispatch
 
@@ -61,6 +62,11 @@ class ToolAgent:
             _remember(self.history, "assistant", refusal)
             return refusal
 
+        # 2.10：范文请求（覆盖被路由到 chat/tool 的情况）
+        wr = detect_writing_request(retrieve_query or query)
+        if wr:
+            return self.qa._write_sample(query, wr)
+
         if decision.channel == "tool":
             result = dispatch(decision.tool, decision.arg)
             _remember(self.history, "user", query)
@@ -92,6 +98,11 @@ class ToolAgent:
             _remember(self.history, "user", query)
             _remember(self.history, "assistant", refusal)
             return RouteDecision(channel="refuse"), refusal
+
+        # 2.10：索要范文 → 走写作专用通道（跳过路由，省一次 LLM 分类）
+        wr = detect_writing_request(query)
+        if wr:
+            return RouteDecision(channel="write"), self.qa._write_sample(query, wr)
 
         q_eff = query
         if self.history:

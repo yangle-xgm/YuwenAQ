@@ -54,7 +54,7 @@ from .embeddings import embed_query
 _TOKEN = re.compile(r"[\s\W]+")  # 空白与标点都当分隔，只留中英文数字字符
 
 _ALL_XUEDUAN = ("第一学段", "第二学段", "第三学段", "第四学段")
-_GRADE_CN = re.compile(r"[一二三四五六七八九十]年级")
+_GRADE_CN = re.compile(r"初[一二三]|初中|(?<![初中高])[一二三四五六七八九十]年级")
 _GRADE_NUM = re.compile(r"[1-9]年级")
 _XUEDUAN_RE = re.compile(r"第[一二三四]学段")
 
@@ -68,10 +68,14 @@ def _grade_targets(query: str):
     """
     targets = set()
     for g in _GRADE_CN.findall(query):
-        targets.add(GRADE_XUEDUAN[g])
+        xu = GRADE_XUEDUAN.get(g)
+        if xu:
+            targets.add(xu)
     for g in _GRADE_NUM.findall(query):
         cn = "一二三四五六七八九"["123456789".index(g[0])] + "年级"
-        targets.add(GRADE_XUEDUAN[cn])
+        xu = GRADE_XUEDUAN.get(cn)
+        if xu:
+            targets.add(xu)
     for x in _XUEDUAN_RE.findall(query):
         targets.add(x)
     return targets

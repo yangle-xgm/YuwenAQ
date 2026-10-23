@@ -120,10 +120,13 @@ class OllamaClient:
         return self.client.chat.completions.create(**params)
 
     def chat(self, messages, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
-             include_reasoning=False, think=None) -> str:
-        """非流式：返回完整回答（默认只取正式回答，过滤思考）。"""
+             include_reasoning=False, think=None, **extra) -> str:
+        """非流式：返回完整回答（默认只取正式回答，过滤思考）。
+
+        **extra 透传给 create()，例如 max_tokens=1500（写作通道需要更长输出）。
+        """
         resp = self.create(messages, temperature=temperature, top_p=top_p,
-                           stream=False, think=think)
+                           stream=False, think=think, **extra)
         msg = resp.choices[0].message
         content = msg.content or ""
         if include_reasoning:
