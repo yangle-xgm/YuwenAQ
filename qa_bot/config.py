@@ -134,7 +134,12 @@ HYDE_MODEL = os.getenv("QA_HYDE_MODEL", "modelscope.cn/unsloth/DeepSeek-R1-Disti
 # ---------------------------------------------------------------- 路径
 DATA_DIR = PROJECT_DIR / "data"
 INDEX_DIR = PROJECT_DIR / "index"
-KB_DIR = Path(os.getenv("QA_KB_DIR", str(PROJECT_DIR.parent / "语文课程标准RAG知识库")))
+# 知识库默认位置：优先用项目同名目录 ../../语文课程标准RAG知识库（本地开发沿用原布局），
+# 若克隆后该目录不存在（即不在仓库外的同级目录），回退到仓库内置副本 ./语文课程标准RAG知识库。
+# 仍可用环境变量 QA_KB_DIR 强制指定。
+_KB_LOCAL = PROJECT_DIR / "语文课程标准RAG知识库"
+_KB_PARENT = PROJECT_DIR.parent / "语文课程标准RAG知识库"
+KB_DIR = Path(os.getenv("QA_KB_DIR", str(_KB_PARENT if _KB_PARENT.exists() else _KB_LOCAL)))
 DEFAULT_SOURCE = os.getenv("QA_SOURCE", str(KB_DIR))
 INDEX_PATH = INDEX_DIR / "vectorstore"
 
